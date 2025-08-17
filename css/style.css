@@ -664,6 +664,7 @@ html, body {
     min-width: 280px;
     border: 1px solid #e0e0e0;
     overflow: hidden;
+    z-index: 99999 !important;
 }
 
 .leaflet-popup-content {
@@ -725,6 +726,23 @@ html, body {
 .leaflet-popup-content button:active {
     transform: translateY(0);
     box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+}
+
+/* Force popup elements above everything */
+.leaflet-popup-pane {
+    z-index: 99999 !important;
+}
+
+.leaflet-popup {
+    z-index: 99999 !important;
+}
+
+.leaflet-tooltip-pane {
+    z-index: 99999 !important;
+}
+
+.leaflet-tooltip {
+    z-index: 99999 !important;
 }
 
 .leaflet-popup-tip-container {

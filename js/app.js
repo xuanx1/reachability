@@ -234,13 +234,68 @@ function resetIsolines(e) {
 }
 
 /**
- * Example function to display information about an isoline in a popup when the user clicks on it
+ * Function to display reachability information in a styled popup when user clicks on an isoline
  */
 function clickIsolines(e) {
     var layer = e.target;
     var props = layer.feature.properties;
-    var popupContent = 'Mode of travel: ' + props['Travel mode'] + '<br />Range: 0 - ' + props['Range'] + ' ' + props['Range units'] + '<br />Area: ' + props['Area'] + ' ' + props['Area units'] + '<br />Population: ' + props['Population'];
-    if (props.hasOwnProperty('Reach factor')) popupContent += '<br />Reach factor: ' + props['Reach factor'];
+    
+    // Parse area value and convert from square meters to square kilometers if needed
+    let areaValue = props['Area'] || 0;
+    let areaUnits = props['Area units'] || '';
+    
+    console.log('Original area value:', areaValue, 'units:', areaUnits);
+    
+    // Handle area conversion more robustly
+    if (typeof areaValue === 'string') {
+        areaValue = parseFloat(areaValue.replace(/[^\d.]/g, ''));
+    }
+    
+    if (typeof areaValue === 'number' && !isNaN(areaValue)) {
+        // If area is in square meters (very large numbers), convert to km²
+        if (areaValue > 10000 || areaUnits.toLowerCase().includes('meter')) {
+            areaValue = (areaValue / 1000000).toFixed(2);
+            areaUnits = 'km²';
+        } else if (areaValue > 100) {
+            // Still quite large, likely meters
+            areaValue = (areaValue / 1000000).toFixed(2);
+            areaUnits = 'km²';
+        } else {
+            // Already reasonable size, format to 2 decimal places
+            areaValue = areaValue.toFixed(2);
+            if (!areaUnits) areaUnits = 'km²';
+        }
+    }
+    
+    console.log('Converted area value:', areaValue, 'units:', areaUnits);
+    
+    // Format reach factor with explanation
+    let reachFactorHtml = '';
+    if (props.hasOwnProperty('Reach factor')) {
+        const factor = parseFloat(props['Reach factor']);
+        let explanation = '';
+        if (factor >= 0.9) {
+            explanation = ' (Excellent accessibility)';
+        } else if (factor >= 0.7) {
+            explanation = ' (Good accessibility)';
+        } else if (factor >= 0.5) {
+            explanation = ' (Moderate accessibility)';
+        } else {
+            explanation = ' (Limited accessibility)';
+        }
+        reachFactorHtml = `<p><strong>Reach Factor:</strong> ${props['Reach factor']}${explanation}</p>`;
+    }
+    
+    // Create styled popup content matching subway popup design
+    var popupContent = `
+        <h4>Reachability Analysis</h4>
+        <p><strong>Travel Mode:</strong> ${props['Travel mode']}</p>
+        <p><strong>Range:</strong> 0 - ${props['Range']} ${props['Range units']}</p>
+        <p><strong>Area:</strong> ${areaValue} ${areaUnits}</p>
+        <p><strong>Population:</strong> ${props['Population'] || 'N/A'}</p>
+        ${reachFactorHtml}
+    `;
+    
     layer.bindPopup(popupContent).openPopup();
 }
 
@@ -370,12 +425,9 @@ function initMap() {
         switchToBackupApiKey();
     }, 2000);
 
-    // Listen for popup events to trigger reachability popup styling
+    // Listen for popup events (simplified)
     map.on('popupopen', function(e) {
-        console.log('Popup opened event triggered');
-        // Run styling check after a short delay to ensure popup is fully rendered
-        setTimeout(styleReachabilityPopups, 100);
-        setTimeout(styleReachabilityPopups, 500);
+        console.log('Popup opened');
     });
 
     // Set up event listener to deactivate plot button after any isochrone is displayed
@@ -2020,226 +2072,7 @@ function showNearestStationsInfo(lat, lng) {
     return info;
 }
 
-/**
- * Aggressively force all popup elements to appear above reachability isochrones
- */
-function forcePopupsAboveEverything() {
-    // Set all popup panes to extremely high z-index
-    if (map.getPane('popupPane')) {
-        map.getPane('popupPane').style.zIndex = 99999;
-    }
-    if (map.getPane('tooltipPane')) {
-        map.getPane('tooltipPane').style.zIndex = 99999;
-    }
-    
-    // Force all popup elements in DOM
-    const popupSelectors = [
-        '.leaflet-popup',
-        '.leaflet-popup-pane',
-        '.leaflet-tooltip',
-        '.leaflet-tooltip-pane',
-        '.leaflet-popup-content-wrapper',
-        '.leaflet-control-reachability',
-        '.reachability-control-settings-container',
-        '[class*="popup"]',
-        '[class*="tooltip"]'
-    ];
-    
-    popupSelectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(element => {
-            element.style.zIndex = '99999';
-            element.style.position = 'relative';
-        });
-    });
-    
-    // Force overlay pane (isochrones) to stay below
-    if (map.getPane('overlayPane')) {
-        map.getPane('overlayPane').style.zIndex = 100;
-    }
-}
-
-// Run the aggressive popup forcing periodically
-setInterval(forcePopupsAboveEverything, 1000);
-
-/**
- * Aggressively style any popup that contains reachability data
- */
-function styleReachabilityPopups() {
-    console.log('Checking for reachability popups...');
-    
-    // Find all popup elements
-    const allPopups = document.querySelectorAll('.leaflet-popup');
-    
-    allPopups.forEach(popupElement => {
-        const content = popupElement.textContent || popupElement.innerText || '';
-        
-        // Check if this popup contains reachability data
-        if (content.includes('Mode of travel') || 
-            content.includes('Range:') || 
-            content.includes('Area:') || 
-            content.includes('Population:') || 
-            content.includes('Reach factor')) {
-            
-            console.log('Found reachability popup! Content:', content);
-            
-            // Skip if already processed
-            if (popupElement.hasAttribute('data-reachability-styled')) {
-                console.log('Already styled, skipping...');
-                return;
-            }
-            
-            console.log('Styling reachability popup...');
-            popupElement.setAttribute('data-reachability-styled', 'true');
-            
-            // Hide the original popup content immediately
-            const originalContent = popupElement.querySelector('.leaflet-popup-content');
-            if (originalContent) {
-                originalContent.style.display = 'none';
-            }
-            
-            // Parse the raw content and handle the concatenated text
-            let cleanContent = content.replace(/Mode of travel:/g, '\nTravel Mode:')
-                                    .replace(/Range:/g, '\nRange:')
-                                    .replace(/Area:/g, '\nArea:')
-                                    .replace(/Population:/g, '\nPopulation:')
-                                    .replace(/Reach factor:/g, '\nReach factor:');
-            
-            const lines = cleanContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-            console.log('Parsed lines:', lines);
-            
-            // Create formatted HTML with proper spacing
-            let formattedHTML = `
-                <div style="
-                    background: white;
-                    border-radius: 8px;
-                    padding: 16px;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    border: 1px solid #e0e0e0;
-                    min-width: 250px;
-                    margin: 0;
-                    position: relative;
-                    z-index: 9999;
-                ">
-                    <h4 style="
-                        font-family: 'Gotham', 'Avenir Next', 'Helvetica Neue', sans-serif;
-                        color: #333;
-                        font-size: 16px;
-                        font-weight: 600;
-                        margin: 0 0 12px 0;
-                        padding-bottom: 8px;
-                        border-bottom: 2px solid #667eea;
-                        letter-spacing: 1px;
-                        text-transform: uppercase;
-                    ">Reachability Analysis</h4>
-                    <div>
-            `;
-            
-            lines.forEach(line => {
-                if (line.includes(':')) {
-                    const colonIndex = line.indexOf(':');
-                    let label = line.substring(0, colonIndex).trim();
-                    let value = line.substring(colonIndex + 1).trim();
-                    
-                    // Replace "Mode of travel" with "Travel Mode"
-                    if (label === 'Mode of travel') {
-                        label = 'Travel Mode';
-                    }
-                    
-                    // Fix area value - convert from square meters to square kilometers
-                    if (label === 'Area') {
-                        // Extract the numeric value
-                        const numericValue = parseFloat(value.replace(/[^\d.]/g, ''));
-                        if (!isNaN(numericValue)) {
-                            // If the value is very large, assume it's in square meters and convert to km²
-                            if (numericValue > 1000) {
-                                const areaInKm2 = (numericValue / 1000000).toFixed(2);
-                                value = `${areaInKm2} km²`;
-                            } else {
-                                // Value is already reasonable, keep as is
-                                value = `${numericValue.toFixed(2)} km²`;
-                            }
-                        }
-                    }
-                    
-                    // Add explanation for reach factor
-                    if (label === 'Reach factor') {
-                        const factor = parseFloat(value);
-                        let explanation = '';
-                        if (factor >= 0.9) {
-                            explanation = ' (Excellent accessibility)';
-                        } else if (factor >= 0.7) {
-                            explanation = ' (Good accessibility)';
-                        } else if (factor >= 0.5) {
-                            explanation = ' (Moderate accessibility)';
-                        } else {
-                            explanation = ' (Limited accessibility)';
-                        }
-                        value = value + explanation;
-                    }
-                    
-                    formattedHTML += `
-                        <p style="
-                            margin: 8px 0;
-                            font-size: 13px;
-                            line-height: 1.5;
-                            color: #555;
-                            display: block;
-                        ">
-                            <strong style="color: #333; font-weight: 600; display: inline;">${label}:</strong> 
-                            <span style="color: #555; display: inline;">${value}</span>
-                        </p>
-                    `;
-                } else if (line.length > 0) {
-                    formattedHTML += `
-                        <p style="
-                            margin: 8px 0;
-                            font-size: 13px;
-                            line-height: 1.5;
-                            color: #555;
-                            display: block;
-                        ">${line}</p>
-                    `;
-                }
-            });
-            
-            formattedHTML += '</div></div>';
-            
-            console.log('Setting formatted HTML:', formattedHTML);
-            
-            // Create a new div to hold our styled content
-            const styledDiv = document.createElement('div');
-            styledDiv.innerHTML = formattedHTML;
-            styledDiv.style.position = 'absolute';
-            styledDiv.style.top = '0';
-            styledDiv.style.left = '0';
-            styledDiv.style.width = '100%';
-            styledDiv.style.zIndex = '9999';
-            
-            // Add the styled content to the popup
-            if (originalContent) {
-                originalContent.parentNode.appendChild(styledDiv);
-            }
-            
-            // Also style the wrapper
-            const wrapper = popupElement.querySelector('.leaflet-popup-content-wrapper');
-            if (wrapper) {
-                Object.assign(wrapper.style, {
-                    background: 'white',
-                    borderRadius: '8px',
-                    border: '1px solid #e0e0e0',
-                    boxShadow: '0 4px 15px rgba(0,0,0,0.15)',
-                    padding: '0',
-                    minWidth: '300px',
-                    position: 'relative'
-                });
-            }
-            
-            console.log('Successfully styled reachability popup!');
-        }
-    });
-}
-
-// Run immediately and then every 500ms
-styleReachabilityPopups();
-setInterval(styleReachabilityPopups, 500);
+// Initialize the app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    initializeMap();
+});
