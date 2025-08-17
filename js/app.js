@@ -21,6 +21,12 @@ let reachabilityControl;
 let currentTravelMode = 'foot-walking';
 let analysisCount = 0;
 
+// Metro system variables
+let metroLinesGroup;
+let metroStationsGroup;
+let metroLayersVisible = true;
+let mtaData = null; // Store loaded MTA data
+
 /**
  * Example function to style the isoline polygons when they are returned from the API call
  */
@@ -171,14 +177,67 @@ function initMap() {
         position: 'bottomright'
     }).addTo(map);
 
+    // Listen for popup events to trigger reachability popup styling
+    map.on('popupopen', function(e) {
+        console.log('Popup opened event triggered');
+        // Run styling check after a short delay to ensure popup is fully rendered
+        setTimeout(styleReachabilityPopups, 100);
+        setTimeout(styleReachabilityPopups, 500);
+    });
+
+    // Set up event listener to deactivate plot button after any isochrone is displayed
+    map.on('reachability:displayed', function() {
+        // After any reachability analysis is displayed, deactivate plot button
+        setTimeout(() => {
+            if (reachabilityControl && reachabilityControl._drawMode && reachabilityControl._toggleDraw) {
+                reachabilityControl._toggleDraw(); // Disable draw mode
+                updateDrawButtonState(); // Update button visual state
+                console.log('Reachability analysis displayed, plot button deactivated');
+            }
+        }, 500); // Small delay to ensure isochrone is fully rendered
+    });
+
+    // Disable draw mode by default (plot deactivated by default)
+    // Use setTimeout to ensure reachability control is fully initialized
+    setTimeout(() => {
+        if (reachabilityControl) {
+            // Force draw mode to be disabled
+            if (reachabilityControl._drawMode) {
+                reachabilityControl._toggleDraw();
+                console.log('Draw mode was enabled, now disabled');
+            } else {
+                console.log('Draw mode was already disabled');
+            }
+            
+            // Update button state to reflect disabled draw mode
+            updateDrawButtonState();
+        }
+    }, 100);
+
     // Load NYC borough boundaries and create mask
     loadNYCBoroughMask();
+
+    // Initialize metro system
+    initializeMetroSystem();
 
     // Initialize UI event handlers
     initializeEventHandlers();
     
     // Initialize the range dropdown with time options (default)
     updateRangeDropdown('time');
+    
+    // Final check to ensure draw mode is disabled after all initialization
+    setTimeout(() => {
+        if (reachabilityControl) {
+            // Force disable draw mode one more time after everything is loaded
+            if (reachabilityControl._drawMode) {
+                reachabilityControl._toggleDraw();
+                console.log('Final check: Draw mode was enabled, now disabled');
+            }
+            updateDrawButtonState();
+            console.log('Final draw mode state:', reachabilityControl._drawMode);
+        }
+    }, 500);
     
     console.log('Map initialized successfully');
 }
@@ -339,6 +398,15 @@ function initializeEventHandlers() {
     document.querySelector('.draw-btn').addEventListener('click', toggleDrawMode);
     document.querySelector('.clear-btn').addEventListener('click', clearAllAnalyses);
     document.querySelector('.export-btn').addEventListener('click', exportGeoJSON);
+    
+    // Subway toggle checkbox
+    document.getElementById('subway-toggle').addEventListener('change', toggleMetroLayers);
+    
+    // Metro toggle button (if exists for backward compatibility)
+    const metroToggleBtn = document.querySelector('.metro-toggle-btn');
+    if (metroToggleBtn) {
+        metroToggleBtn.addEventListener('click', toggleMetroLayers);
+    }
 
     // Location input buttons
     document.querySelector('.search-btn').addEventListener('click', searchLocation);
@@ -413,6 +481,15 @@ function initializeEventHandlers() {
                 if (drawBtn) {
                     drawBtn.classList.add('active');
                 }
+                
+                // After startup example is drawn, deactivate plot button
+                setTimeout(() => {
+                    if (reachabilityControl && reachabilityControl._drawMode && reachabilityControl._toggleDraw) {
+                        reachabilityControl._toggleDraw(); // Disable draw mode
+                        updateDrawButtonState(); // Update button visual state
+                        console.log('Startup example completed, plot button deactivated');
+                    }
+                }, 1000); // Additional delay to ensure isochrone is fully rendered
             }, 500); // Small delay to ensure plot is completed
         }, 1000); // Delay to ensure plugin is fully initialized
     }
@@ -1012,7 +1089,16 @@ function plotLocation(lat, lng, name) {
         map.removeLayer(window.currentLocationMarker);
     }
     
-    // Create marker
+    // Create marker with enhanced popup
+    const nearestStationsInfo = showNearestStationsInfo(lat, lng);
+    const popupContent = `
+        <div class="location-popup">
+            <h4>${name}</h4>
+            <p><strong>Coordinates:</strong><br/>${lat.toFixed(4)}, ${lng.toFixed(4)}</p>
+            <div style="margin-top: 8px;">${nearestStationsInfo}</div>
+        </div>
+    `;
+    
     window.currentLocationMarker = L.marker([lat, lng], {
         icon: L.divIcon({
             className: 'location-marker',
@@ -1021,6 +1107,9 @@ function plotLocation(lat, lng, name) {
             iconAnchor: [8, 8]
         })
     }).addTo(map);
+    
+    // Bind popup to marker
+    window.currentLocationMarker.bindPopup(popupContent);
     
     // Pan to location
     map.setView([lat, lng], Math.max(map.getZoom(), 14));
@@ -1074,5 +1163,855 @@ window.debugFunctions = {
     searchAndPlotFirst,
     reverseGeocodeAndPlot,
     parseCoordinates,
-    plotLocation
+    plotLocation,
+    toggleMetroLayers,
+    initializeMetroSystem,
+    loadMTAData,
+    drawSubwayLinesFromMTA,
+    drawSubwayStationsFromMTA
 };
+
+/**
+ * Initialize the NYC Metro System visualization
+ */
+async function initializeMetroSystem() {
+    try {
+        console.log('=== STARTING METRO SYSTEM INITIALIZATION ===');
+        console.log('METRO_CONFIG available:', typeof METRO_CONFIG !== 'undefined' ? 'YES' : 'NO');
+        console.log('SUBWAY_COLORS available:', typeof SUBWAY_COLORS !== 'undefined' ? 'YES' : 'NO');
+        console.log('SUBWAY_LINE_ROUTES available:', typeof SUBWAY_LINE_ROUTES !== 'undefined' ? 'YES' : 'NO');
+        console.log('loadMTAData available:', typeof loadMTAData !== 'undefined' ? 'YES' : 'NO');
+        
+        console.log('Initializing metro system with MTA CSV data...');
+        
+        // Load MTA data from CSV
+        console.log('About to call loadMTAData()...');
+        mtaData = await loadMTAData();
+        console.log('MTA data loaded:', mtaData ? 'SUCCESS' : 'FAILED');
+        if (mtaData) {
+            console.log('MTA data structure:', {
+                stations: mtaData.stations ? mtaData.stations.length : 'NO STATIONS',
+                lines: mtaData.lines ? Object.keys(mtaData.lines).length : 'NO LINES',
+                colors: mtaData.colors ? Object.keys(mtaData.colors).length : 'NO COLORS'
+            });
+        }
+        
+        // Create layer groups for metro lines and stations with proper z-index ordering
+        metroLinesGroup = L.layerGroup().addTo(map);
+        metroStationsGroup = L.layerGroup().addTo(map);
+        
+        // Set z-index on the layer groups to ensure stations appear above lines
+        metroLinesGroup.getPane = function() { return map.getPane('overlayPane'); };
+        metroStationsGroup.getPane = function() { return map.getPane('overlayPane'); };
+        
+        // Create custom panes for proper z-index control
+        if (!map.getPane('metro-lines')) {
+            map.createPane('metro-lines');
+            map.getPane('metro-lines').style.zIndex = METRO_CONFIG.zIndexOffset - 200; // Lines behind stations
+        }
+        if (!map.getPane('metro-stations')) {
+            map.createPane('metro-stations');
+            map.getPane('metro-stations').style.zIndex = METRO_CONFIG.zIndexOffset + 300; // Stations on top
+        }
+        if (!map.getPane('wheelchair-icons')) {
+            map.createPane('wheelchair-icons');
+            map.getPane('wheelchair-icons').style.zIndex = METRO_CONFIG.zIndexOffset + 400; // Wheelchair icons on top of stations
+        }
+        
+        // Ensure popups appear above everything by adjusting the popup pane z-index
+        map.getPane('popupPane').style.zIndex = METRO_CONFIG.zIndexOffset + 500;
+        
+        // Remove and re-add layer groups with custom panes
+        map.removeLayer(metroLinesGroup);
+        map.removeLayer(metroStationsGroup);
+        metroLinesGroup = L.layerGroup({pane: 'metro-lines'}).addTo(map);
+        metroStationsGroup = L.layerGroup({pane: 'metro-stations'}).addTo(map);
+        
+        // Draw subway lines using MTA data  
+        drawSubwayLinesFromMTA();
+        
+        // Draw subway stations using MTA data
+        drawSubwayStationsFromMTA();
+        
+        console.log('Metro system initialized with', mtaData.stations.length, 'stations (lines disabled)');
+        
+    } catch (error) {
+        console.error('Error initializing metro system:', error);
+        
+        // Fallback to original hardcoded initialization
+        metroLinesGroup = L.layerGroup().addTo(map);
+        metroStationsGroup = L.layerGroup().addTo(map);
+        
+        // Set z-index on the layer groups to ensure stations appear above lines
+        metroLinesGroup.getPane = function() { return map.getPane('overlayPane'); };
+        metroStationsGroup.getPane = function() { return map.getPane('overlayPane'); };
+        
+        // Create custom panes for proper z-index control
+        if (!map.getPane('metro-lines')) {
+            map.createPane('metro-lines');
+            map.getPane('metro-lines').style.zIndex = METRO_CONFIG.zIndexOffset - 200; // Lines behind stations
+        }
+        if (!map.getPane('metro-stations')) {
+            map.createPane('metro-stations');
+            map.getPane('metro-stations').style.zIndex = METRO_CONFIG.zIndexOffset + 300; // Stations on top
+        }
+        if (!map.getPane('wheelchair-icons')) {
+            map.createPane('wheelchair-icons');
+            map.getPane('wheelchair-icons').style.zIndex = METRO_CONFIG.zIndexOffset + 400; // Wheelchair icons on top of stations
+        }
+        
+        // Ensure popups appear above everything by adjusting the popup pane z-index
+        map.getPane('popupPane').style.zIndex = METRO_CONFIG.zIndexOffset + 500;
+        
+        // Remove and re-add layer groups with custom panes
+        map.removeLayer(metroLinesGroup);
+        map.removeLayer(metroStationsGroup);
+        metroLinesGroup = L.layerGroup({pane: 'metro-lines'}).addTo(map);
+        metroStationsGroup = L.layerGroup({pane: 'metro-stations'}).addTo(map);
+        drawSubwayLines();
+        drawSubwayStations();
+    }
+}
+
+/**
+ * Draw subway lines using GeoJSON data from mta-lines.geojson
+ */
+async function drawSubwayLinesFromMTA() {
+    console.log('Loading subway lines from GeoJSON...');
+    
+    try {
+        // Clear existing lines
+        metroLinesGroup.clearLayers();
+        
+        // Load GeoJSON data
+        const response = await fetch('./mta-lines.geojson');
+        if (!response.ok) {
+            throw new Error(`Failed to load GeoJSON: ${response.status}`);
+        }
+        
+        const geojsonData = await response.json();
+        console.log('GeoJSON loaded, processing features...');
+        
+        // Process each subway line feature
+        geojsonData.features.forEach(feature => {
+            const properties = feature.properties;
+            const geometry = feature.geometry;
+            
+            if (geometry.type === 'MultiLineString') {
+                const lineId = properties.rt_symbol || properties.name || 'Unknown';
+                const color = SUBWAY_COLORS[lineId] || '#666666';
+                
+                console.log(`Processing line: ${lineId} with color: ${color}`);
+                
+                // Extract coordinates from MultiLineString
+                const coordinates = geometry.coordinates.map(lineString => 
+                    lineString.map(coord => [coord[1], coord[0]]) // Convert [lng, lat] to [lat, lng]
+                );
+                
+                // Create polylines for each segment
+                coordinates.forEach((coordsArray, index) => {
+                    const polyline = L.polyline(coordsArray, {
+                        color: color,
+                        weight: map.getZoom() <= 12 ? 2 : 3,
+                        opacity: 0.8,
+                        pane: 'metro-lines',
+                        className: 'subway-line',
+                        lineId: lineId
+                    });
+                    
+                    // Add popup with line information
+                    polyline.bindPopup(`
+                        <div class="subway-popup">
+                            <h3>Subway Line ${lineId}</h3>
+                            <div class="lines">
+                                <span class="line-badge" style="background-color: ${color};">${lineId}</span>
+                            </div>
+                            <p>Route: ${properties.name || lineId}</p>
+                        </div>
+                    `);
+                    
+                    // Add hover effects
+                    polyline.on('mouseover', function(e) {
+                        const layer = e.target;
+                        layer.setStyle({
+                            weight: map.getZoom() <= 12 ? 4 : 5,
+                            opacity: 1
+                        });
+                    });
+                    
+                    polyline.on('mouseout', function(e) {
+                        const layer = e.target;
+                        layer.setStyle({
+                            weight: map.getZoom() <= 12 ? 2 : 3,
+                            opacity: 0.8
+                        });
+                    });
+                    
+                    metroLinesGroup.addLayer(polyline);
+                });
+            }
+        });
+        
+        console.log(`Subway lines drawn successfully from GeoJSON: ${geojsonData.features.length} features processed`);
+        
+    } catch (error) {
+        console.error('Error loading subway lines from GeoJSON:', error);
+        // Fallback to hardcoded routes if available
+        if (typeof SUBWAY_LINE_ROUTES !== 'undefined') {
+            console.log('Falling back to hardcoded routes...');
+            drawSubwayLinesFromHardcodedData();
+        }
+    }
+}
+
+/**
+ * Fallback function using hardcoded subway routes
+ */
+function drawSubwayLinesFromHardcodedData() {
+    if (!mtaData || !mtaData.lines) {
+        console.log('No MTA line data available for fallback');
+        return;
+    }
+
+    console.log('Drawing subway lines from hardcoded data (fallback)...');
+    
+    // Clear existing lines
+    metroLinesGroup.clearLayers();
+    
+    // Use the detailed geographic routes from subway-routes.js
+    Object.keys(SUBWAY_LINE_ROUTES).forEach(lineId => {
+        if (mtaData.lines[lineId]) {
+            const route = SUBWAY_LINE_ROUTES[lineId];
+            const color = SUBWAY_COLORS[lineId] || '#666666';
+            
+            // Create polyline for the route
+            const polyline = L.polyline(route, {
+                color: color,
+                weight: map.getZoom() <= 12 ? 1 : 2,
+                opacity: 0.8,
+                pane: 'metro-lines',
+                className: 'subway-line',
+                lineId: lineId
+            });
+            
+            // Add popup with line information
+            polyline.bindPopup(`
+                <div class="subway-popup">
+                    <h3>Subway Line ${lineId}</h3>
+                    <div class="lines">
+                        <span class="line-badge" style="background-color: ${color};">${lineId}</span>
+                    </div>
+                </div>
+            `);
+            
+            // Add hover effects
+            polyline.on('mouseover', function(e) {
+                const layer = e.target;
+                layer.setStyle({
+                    weight: map.getZoom() <= 12 ? 3 : 4,
+                    opacity: 1
+                });
+            });
+            
+            polyline.on('mouseout', function(e) {
+                const layer = e.target;
+                layer.setStyle({
+                    weight: map.getZoom() <= 12 ? 1 : 2,
+                    opacity: 0.8
+                });
+            });
+            
+            metroLinesGroup.addLayer(polyline);
+        }
+    });
+    
+    console.log('Subway lines drawn successfully from hardcoded data');
+}
+
+/**
+ * Draw subway lines using hardcoded data (fallback)
+ */
+function drawSubwayLines() {
+    // Lines are disabled - only showing stations
+    console.log('Subway lines disabled (fallback) - showing stations only');
+    return;
+}
+
+/**
+ * Draw subway lines using GeoJSON data
+ */
+async function drawSubwayLinesFromGeoJSON() {
+    try {
+        console.log('Loading MTA subway lines from GeoJSON...');
+        
+        // Load the GeoJSON file
+        const response = await fetch('mta-lines.geojson');
+        if (!response.ok) {
+            throw new Error('GeoJSON file not found or empty');
+        }
+        
+        const geojsonData = await response.json();
+        
+        if (!geojsonData.features || geojsonData.features.length === 0) {
+            throw new Error('No features found in GeoJSON');
+        }
+        
+        // Add GeoJSON layer to map with dynamic styling based on zoom
+        const subwayLinesLayer = L.geoJSON(geojsonData, {
+            pane: 'metro-lines', // Assign to lines pane
+            style: function(feature) {
+                // Get line color from properties or default colors
+                const lineId = feature.properties.rt_symbol || feature.properties.route_id || feature.properties.line || feature.properties.name;
+                const lineColor = getLineColor(lineId);
+                
+                // Dynamic line weight based on zoom level
+                const currentZoom = map.getZoom();
+                const lineWeight = currentZoom >= 14 ? 2 : 1; // 2px when zoomed in, 1px when zoomed out
+                
+                return {
+                    color: lineColor,
+                    weight: lineWeight,
+                    opacity: 0.8
+                };
+            },
+            onEachFeature: function(feature, layer) {
+                // Add hover effect like stations
+                layer.on('mouseover', function() {
+                    this.setStyle({
+                        weight: 3,
+                        opacity: 1
+                    });
+                });
+                
+                layer.on('mouseout', function() {
+                    const currentZoom = map.getZoom();
+                    const lineWeight = currentZoom >= 14 ? 2 : 1;
+                    this.setStyle({
+                        weight: lineWeight,
+                        opacity: 0.8
+                    });
+                });
+            }
+        });
+        
+        // Add layer to map
+        subwayLinesLayer.addTo(metroLinesGroup);
+        
+        // Store reference for zoom updates
+        if (!window.subwayLinesLayer) {
+            window.subwayLinesLayer = subwayLinesLayer;
+        }
+        
+        console.log('MTA subway lines loaded from GeoJSON successfully');
+        
+    } catch (error) {
+        console.warn('Failed to load subway lines from GeoJSON:', error);
+        console.log('Falling back to hardcoded line data...');
+        drawSubwayLines(); // Fallback to existing method
+    }
+}
+
+/**
+ * Get line color based on route ID
+ */
+function getLineColor(routeId) {
+    if (!routeId) return '#808183';
+    
+    // Clean up route ID (remove spaces, convert to uppercase)
+    const cleanRouteId = routeId.toString().trim().toUpperCase();
+    
+    // Check both SUBWAY_COLORS and mtaData.colors
+    return SUBWAY_COLORS[cleanRouteId] || 
+           (mtaData && mtaData.colors ? mtaData.colors[cleanRouteId] : null) ||
+           '#808183'; // Default gray
+}
+
+/**
+ * Draw subway stations using MTA CSV data
+ */
+function drawSubwayStationsFromMTA() {
+    if (!mtaData || !mtaData.stations) {
+        console.warn('No MTA station data available, falling back to hardcoded data');
+        drawSubwayStations();
+        return;
+    }
+    
+    // Get unique stations to avoid duplicates
+    const uniqueStations = getUniqueStations(mtaData.stations);
+    console.log('Processing stations by borough:');
+    const boroughCounts = {};
+    uniqueStations.forEach(station => {
+        boroughCounts[station.borough] = (boroughCounts[station.borough] || 0) + 1;
+    });
+    console.log('Borough station counts:', boroughCounts);
+    
+    uniqueStations.forEach(station => {
+        // Skip stations with invalid coordinates
+        if (!station.lat || !station.lng || isNaN(station.lat) || isNaN(station.lng)) return;
+        
+        // All stations use blue color
+        const stationColor = '#0073d4'; // Blue color for all stations
+        
+        // Create station marker with blue color (dynamic sizing based on zoom)
+        const baseRadius = map.getZoom() >= 14 ? 4 : METRO_CONFIG.stationRadius;
+        const marker = L.circleMarker([station.lat, station.lng], {
+            radius: baseRadius + 1, // Slightly larger for better visibility
+            weight: METRO_CONFIG.stationWeight,
+            color: '#ffffff', // White border for contrast
+            fillColor: stationColor, // Blue fill for all stations
+            fillOpacity: 0.9, // Slightly more opaque
+            pane: 'metro-stations' // Assign to stations pane for proper z-index
+        });
+        
+        // Add wheelchair icon for ADA accessible stations
+        if (station.ada) {
+            const wheelchairIcon = L.divIcon({
+                html: '<div style="color: white; font-size: 10px; text-align: center; line-height: 12px; font-weight: bold;">♿</div>',
+                className: 'wheelchair-icon',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            
+            const wheelchairMarker = L.marker([station.lat, station.lng], {
+                icon: wheelchairIcon,
+                pane: 'wheelchair-icons'
+            });
+            
+            metroStationsGroup.addLayer(wheelchairMarker);
+        }
+        
+        // Create popup content with station information
+        const linesHtml = station.lines.map(line => {
+            const color = mtaData.colors[line] || '#808183';
+            return `<span style="background-color: ${color}; color: white; padding: 2px 6px; margin: 1px; border-radius: 3px; font-weight: bold;">${line}</span>`;
+        }).join(' ');
+        
+        const adaStatus = station.ada ? '<span style="color: green;">♿ ADA Accessible</span>' : '<span style="color: #999;">Not ADA Accessible</span>';
+        
+        const popupContent = `
+            <h4>${station.name}</h4>
+            <p><strong>Borough:</strong> ${getBoroughName(station.borough)}</p>
+            <p><strong>Lines:</strong><br/>${linesHtml}</p>
+            <p><strong>Structure:</strong> ${station.structure}</p>
+            <p><strong>Accessibility:</strong><br/>${adaStatus}</p>
+            <p><strong>Coordinates:</strong><br/>${station.lat.toFixed(4)}, ${station.lng.toFixed(4)}</p>
+            <button onclick="plotLocation(${station.lat}, ${station.lng}, '${station.name}')" 
+                    style="background: #0073d4; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">
+                Analyze from here
+            </button>
+        `;
+        
+        marker.bindPopup(popupContent);
+        
+        // No labels - clean visualization
+        
+        metroStationsGroup.addLayer(marker);
+    });
+    
+    // Add zoom event listener to update station sizes
+    map.on('zoomend', updateStationSizes);
+}
+
+/**
+ * Draw subway stations using hardcoded data (fallback)
+ */
+function drawSubwayStations() {
+    console.log('Using fallback subway station data');
+    
+    SUBWAY_STATIONS.forEach(station => {
+        // Determine station color based on primary line
+        let stationColor = METRO_CONFIG.stationColor; // Default white
+        if (station.lines && station.lines.length > 0) {
+            // Use the color of the first line as the primary color
+            stationColor = SUBWAY_COLORS[station.lines[0]] || METRO_CONFIG.stationColor;
+        }
+        
+        // Create station marker with line color
+        // Create station marker with line color (dynamic sizing based on zoom)
+        const baseRadius = map.getZoom() >= 14 ? 4 : METRO_CONFIG.stationRadius;
+        const marker = L.circleMarker([station.lat, station.lng], {
+            radius: baseRadius + 1,
+            weight: METRO_CONFIG.stationWeight,
+            color: '#ffffff', // White border for contrast
+            fillColor: stationColor, // Use line color as fill
+            fillOpacity: 0.9,
+            zIndexOffset: METRO_CONFIG.zIndexOffset + 100
+        });
+        
+        // Create popup content with station information
+        const linesHtml = station.lines.map(line => {
+            const color = SUBWAY_COLORS[line] || '#808183';
+            return `<span style="background-color: ${color}; color: white; padding: 2px 6px; margin: 1px; border-radius: 3px; font-weight: bold;">${line}</span>`;
+        }).join(' ');
+        
+        const popupContent = `
+            <h4>${station.name}</h4>
+            <p><strong>Lines:</strong><br/>${linesHtml}</p>
+            <p><strong>Coordinates:</strong><br/>${station.lat.toFixed(4)}, ${station.lng.toFixed(4)}</p>
+            <button onclick="plotLocation(${station.lat}, ${station.lng}, '${station.name}')" 
+                    style="background: #0073d4; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">
+                Analyze from here
+            </button>
+        `;
+        
+        marker.bindPopup(popupContent);
+        
+        // No labels - clean visualization
+        
+        metroStationsGroup.addLayer(marker);
+    });
+    
+    // Add zoom event listener to update station sizes
+    map.on('zoomend', updateStationSizes);
+}
+
+/**
+ * Update station sizes and line weights based on zoom level
+ */
+function updateStationSizes() {
+    const currentZoom = map.getZoom();
+    const newRadius = currentZoom >= 14 ? 4 : METRO_CONFIG.stationRadius;
+    const newLineWeight = currentZoom >= 14 ? 2 : 1;
+    
+    // Update station sizes
+    metroStationsGroup.eachLayer(function(layer) {
+        if (layer instanceof L.CircleMarker) {
+            layer.setRadius(newRadius + 1);
+        }
+    });
+    
+    // Update line weights in metroLinesGroup
+    metroLinesGroup.eachLayer(function(layer) {
+        if (layer.setStyle) {
+            layer.setStyle({ weight: newLineWeight });
+        }
+    });
+    
+    // Update line weights in legacy subwayLinesLayer if it exists
+    if (window.subwayLinesLayer) {
+        window.subwayLinesLayer.eachLayer(function(layer) {
+            if (layer.setStyle) {
+                layer.setStyle({ weight: newLineWeight });
+            }
+        });
+    }
+}
+
+/**
+ * Convert borough code to full name
+ */
+function getBoroughName(code) {
+    const boroughs = {
+        'M': 'Manhattan',
+        'Bk': 'Brooklyn', 
+        'Q': 'Queens',
+        'Bx': 'Bronx',
+        'SI': 'Staten Island'
+    };
+    return boroughs[code] || code;
+}
+
+/**
+ * Toggle metro layers visibility
+ */
+function toggleMetroLayers() {
+    if (metroLayersVisible) {
+        map.removeLayer(metroLinesGroup);
+        map.removeLayer(metroStationsGroup);
+        metroLayersVisible = false;
+        
+        // Update button text
+        const toggleBtn = document.querySelector('.metro-toggle-btn');
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fa fa-train"></i><span>Show Stations</span>';
+            toggleBtn.classList.remove('active');
+        }
+    } else {
+        map.addLayer(metroLinesGroup);
+        map.addLayer(metroStationsGroup);
+        metroLayersVisible = true;
+        
+        // Update button text
+        const toggleBtn = document.querySelector('.metro-toggle-btn');
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fa fa-train"></i><span>Hide Stations</span>';
+            toggleBtn.classList.add('active');
+        }
+    }
+}
+
+/**
+ * Get nearest subway stations to a given location
+ */
+function getNearestStations(lat, lng, maxDistance = 1000, maxResults = 5) {
+    // Use MTA data if available, otherwise fall back to hardcoded data
+    if (mtaData && mtaData.stations) {
+        return getNearbyStationsFromMTA(lat, lng, maxDistance, maxResults);
+    }
+    
+    // Fallback to original hardcoded data
+    const results = [];
+    
+    SUBWAY_STATIONS.forEach(station => {
+        const distance = map.distance([lat, lng], [station.lat, station.lng]);
+        
+        if (distance <= maxDistance) {
+            results.push({
+                station: station,
+                distance: distance
+            });
+        }
+    });
+    
+    // Sort by distance and return top results
+    return results
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, maxResults);
+}
+
+/**
+ * Show nearest stations info for a given location
+ */
+function showNearestStationsInfo(lat, lng) {
+    const nearestStations = getNearestStations(lat, lng, 1000, 3);
+    
+    if (nearestStations.length === 0) {
+        return "No subway stations within 1km";
+    }
+    
+    let info = "<strong>Nearest Subway Stations:</strong><br/>";
+    nearestStations.forEach((result, index) => {
+        const station = result.station;
+        const distance = Math.round(result.distance);
+        const linesText = station.lines.join(', ');
+        
+        info += `${index + 1}. ${station.name} (${distance}m)<br/>`;
+        info += `&nbsp;&nbsp;&nbsp;Lines: ${linesText}<br/>`;
+    });
+    
+    return info;
+}
+
+/**
+ * Aggressively force all popup elements to appear above reachability isochrones
+ */
+function forcePopupsAboveEverything() {
+    // Set all popup panes to extremely high z-index
+    if (map.getPane('popupPane')) {
+        map.getPane('popupPane').style.zIndex = 99999;
+    }
+    if (map.getPane('tooltipPane')) {
+        map.getPane('tooltipPane').style.zIndex = 99999;
+    }
+    
+    // Force all popup elements in DOM
+    const popupSelectors = [
+        '.leaflet-popup',
+        '.leaflet-popup-pane',
+        '.leaflet-tooltip',
+        '.leaflet-tooltip-pane',
+        '.leaflet-popup-content-wrapper',
+        '.leaflet-control-reachability',
+        '.reachability-control-settings-container',
+        '[class*="popup"]',
+        '[class*="tooltip"]'
+    ];
+    
+    popupSelectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(element => {
+            element.style.zIndex = '99999';
+            element.style.position = 'relative';
+        });
+    });
+    
+    // Force overlay pane (isochrones) to stay below
+    if (map.getPane('overlayPane')) {
+        map.getPane('overlayPane').style.zIndex = 100;
+    }
+}
+
+// Run the aggressive popup forcing periodically
+setInterval(forcePopupsAboveEverything, 1000);
+
+/**
+ * Aggressively style any popup that contains reachability data
+ */
+function styleReachabilityPopups() {
+    console.log('Checking for reachability popups...');
+    
+    // Find all popup elements
+    const allPopups = document.querySelectorAll('.leaflet-popup');
+    
+    allPopups.forEach(popupElement => {
+        const content = popupElement.textContent || popupElement.innerText || '';
+        
+        // Check if this popup contains reachability data
+        if (content.includes('Mode of travel') || 
+            content.includes('Range:') || 
+            content.includes('Area:') || 
+            content.includes('Population:') || 
+            content.includes('Reach factor')) {
+            
+            console.log('Found reachability popup! Content:', content);
+            
+            // Skip if already processed
+            if (popupElement.hasAttribute('data-reachability-styled')) {
+                console.log('Already styled, skipping...');
+                return;
+            }
+            
+            console.log('Styling reachability popup...');
+            popupElement.setAttribute('data-reachability-styled', 'true');
+            
+            // Hide the original popup content immediately
+            const originalContent = popupElement.querySelector('.leaflet-popup-content');
+            if (originalContent) {
+                originalContent.style.display = 'none';
+            }
+            
+            // Parse the raw content and handle the concatenated text
+            let cleanContent = content.replace(/Mode of travel:/g, '\nTravel Mode:')
+                                    .replace(/Range:/g, '\nRange:')
+                                    .replace(/Area:/g, '\nArea:')
+                                    .replace(/Population:/g, '\nPopulation:')
+                                    .replace(/Reach factor:/g, '\nReach factor:');
+            
+            const lines = cleanContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            console.log('Parsed lines:', lines);
+            
+            // Create formatted HTML with proper spacing
+            let formattedHTML = `
+                <div style="
+                    background: white;
+                    border-radius: 8px;
+                    padding: 16px;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    border: 1px solid #e0e0e0;
+                    min-width: 250px;
+                    margin: 0;
+                    position: relative;
+                    z-index: 9999;
+                ">
+                    <h4 style="
+                        font-family: 'Gotham', 'Avenir Next', 'Helvetica Neue', sans-serif;
+                        color: #333;
+                        font-size: 16px;
+                        font-weight: 600;
+                        margin: 0 0 12px 0;
+                        padding-bottom: 8px;
+                        border-bottom: 2px solid #667eea;
+                        letter-spacing: 1px;
+                        text-transform: uppercase;
+                    ">Reachability Analysis</h4>
+                    <div>
+            `;
+            
+            lines.forEach(line => {
+                if (line.includes(':')) {
+                    const colonIndex = line.indexOf(':');
+                    let label = line.substring(0, colonIndex).trim();
+                    let value = line.substring(colonIndex + 1).trim();
+                    
+                    // Replace "Mode of travel" with "Travel Mode"
+                    if (label === 'Mode of travel') {
+                        label = 'Travel Mode';
+                    }
+                    
+                    // Fix area value - convert from square meters to square kilometers
+                    if (label === 'Area') {
+                        // Extract the numeric value
+                        const numericValue = parseFloat(value.replace(/[^\d.]/g, ''));
+                        if (!isNaN(numericValue)) {
+                            // If the value is very large, assume it's in square meters and convert to km²
+                            if (numericValue > 1000) {
+                                const areaInKm2 = (numericValue / 1000000).toFixed(2);
+                                value = `${areaInKm2} km²`;
+                            } else {
+                                // Value is already reasonable, keep as is
+                                value = `${numericValue.toFixed(2)} km²`;
+                            }
+                        }
+                    }
+                    
+                    // Add explanation for reach factor
+                    if (label === 'Reach factor') {
+                        const factor = parseFloat(value);
+                        let explanation = '';
+                        if (factor >= 0.9) {
+                            explanation = ' (Excellent accessibility)';
+                        } else if (factor >= 0.7) {
+                            explanation = ' (Good accessibility)';
+                        } else if (factor >= 0.5) {
+                            explanation = ' (Moderate accessibility)';
+                        } else {
+                            explanation = ' (Limited accessibility)';
+                        }
+                        value = value + explanation;
+                    }
+                    
+                    formattedHTML += `
+                        <p style="
+                            margin: 8px 0;
+                            font-size: 13px;
+                            line-height: 1.5;
+                            color: #555;
+                            display: block;
+                        ">
+                            <strong style="color: #333; font-weight: 600; display: inline;">${label}:</strong> 
+                            <span style="color: #555; display: inline;">${value}</span>
+                        </p>
+                    `;
+                } else if (line.length > 0) {
+                    formattedHTML += `
+                        <p style="
+                            margin: 8px 0;
+                            font-size: 13px;
+                            line-height: 1.5;
+                            color: #555;
+                            display: block;
+                        ">${line}</p>
+                    `;
+                }
+            });
+            
+            formattedHTML += '</div></div>';
+            
+            console.log('Setting formatted HTML:', formattedHTML);
+            
+            // Create a new div to hold our styled content
+            const styledDiv = document.createElement('div');
+            styledDiv.innerHTML = formattedHTML;
+            styledDiv.style.position = 'absolute';
+            styledDiv.style.top = '0';
+            styledDiv.style.left = '0';
+            styledDiv.style.width = '100%';
+            styledDiv.style.zIndex = '9999';
+            
+            // Add the styled content to the popup
+            if (originalContent) {
+                originalContent.parentNode.appendChild(styledDiv);
+            }
+            
+            // Also style the wrapper
+            const wrapper = popupElement.querySelector('.leaflet-popup-content-wrapper');
+            if (wrapper) {
+                Object.assign(wrapper.style, {
+                    background: 'white',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0',
+                    boxShadow: '0 4px 15px rgba(0,0,0,0.15)',
+                    padding: '0',
+                    minWidth: '300px',
+                    position: 'relative'
+                });
+            }
+            
+            console.log('Successfully styled reachability popup!');
+        }
+    });
+}
+
+// Run immediately and then every 500ms
+styleReachabilityPopups();
+setInterval(styleReachabilityPopups, 500);

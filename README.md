@@ -19,6 +19,8 @@ An interactive web application that visualizes reachability analysis (isochrones
 - 🔄 **Real-time Updates**: Drag markers to recalculate analysis instantly
 - 🧩 **Reachability Plugin**: Custom Leaflet plugin for advanced isochrone functionality
 - 🌍 **Borough Data**: Includes NYC borough boundary data for context
+- 🚇 **NYC Subway System**: Interactive subway lines and stations with MTA official colors
+- 🚉 **Transit Integration**: Station information and reachability analysis from subway stops
 
 ## Demo
 
@@ -69,7 +71,11 @@ const ORS_API_KEY = 'your_actual_api_key_here';
    - Add multiple analysis points for comparison
    - Toggle layers on/off
    - Export results (if supported)
-6. **Clear analysis**: Use control panel to remove markers and isochrones
+6. **Metro system features**:
+   - Toggle subway lines and stations visibility
+   - Click on stations for line information and quick analysis
+   - View nearest subway stations for any analysis point
+7. **Clear analysis**: Use control panel to remove markers and isochrones
 
 ## 📁 Project Structure
 
@@ -78,13 +84,17 @@ reachability/
 ├── index.html                           # Main application entry point
 ├── package.json                         # Node.js dependencies and scripts
 ├── README.md                           # This documentation
+├── MTA_Subway_Stations_20250817.csv    # Official MTA subway station data (GTFS)
 ├── NYC_Borough_Boundary_5648926780594355063.geojson  # NYC boundary data
 ├── css/
 │   ├── style.css                       # Main application styles
 │   └── leaflet.reachability.css        # Reachability plugin styles
 ├── js/
 │   ├── app.js                          # Main application logic
-│   └── leaflet.reachability.js         # Custom Leaflet reachability plugin
+│   ├── leaflet.reachability.js         # Custom Leaflet reachability plugin
+│   ├── metro-data.js                   # NYC subway system data and configuration (fallback)
+│   ├── subway-routes.js                # Geographic subway line routing data
+│   └── mta-csv-loader.js               # MTA CSV data loader and processor
 └── .github/
     └── copilot-instructions.md         # Development guidelines for AI assistance
 ```
@@ -98,6 +108,7 @@ reachability/
 - **Vanilla JavaScript (ES6+)** - No heavy frameworks, pure modern JavaScript
 - **CSS3** - Modern styling with flexbox, grid, and responsive design
 - **GeoJSON** - NYC borough boundary data for geographic context
+- **MTA Data** - Official NYC subway system colors and station information
 
 ## 🗺️ Map Configuration
 
@@ -116,6 +127,70 @@ const NYC_BOUNDS = L.latLngBounds(
     [40.915, -73.700]  // Northeast (Bronx/Queens)
 );
 ```
+
+## 🚇 NYC Subway System Integration
+
+The application includes a comprehensive NYC subway system overlay using **real MTA data** from the official GTFS feed, displaying **stations only** with line-specific colors:
+
+### Data Source
+- **MTA GTFS Data**: Official Metropolitan Transportation Authority data
+- **Real-time updates**: CSV file contains current station information
+- **Comprehensive coverage**: All subway stations across NYC
+- **Official information**: Station names, coordinates, accessibility, and line assignments
+
+### Station-Only Visualization
+- **Clean interface**: No cluttered subway lines, only station markers
+- **Line-colored stations**: Each station displays the color of its primary subway line
+- **Official MTA colors**: Authentic color scheme matching real subway maps
+- **Enhanced visibility**: Larger station markers with white borders for contrast
+
+### Subway Stations (from MTA CSV)
+- **498 station records** with precise GTFS coordinates
+- **Line-specific coloring**: Stations colored by their primary subway line
+- **ADA accessibility information** with visual indicators
+- **Multi-line stations** showing all available lines at each stop
+- **Structure types** (subway, elevated, open cut)
+- **Borough identification** and complex grouping
+- **Interactive markers** with comprehensive station details
+- **White borders** for enhanced visibility and contrast
+
+### Metro System Features
+Currently, the application displays a **station-only visualization** with:
+- **Toggle Metro Stations**: Show/hide all subway stations with a single button
+- **Official MTA colors**: Each station is colored by its primary subway line  
+- **No connecting lines**: Clean visualization focusing only on station locations
+- **Accessibility indicators**: ADA-compliant stations marked with ♿ icon
+
+### Enhanced Features
+- **ADA accessibility indicators**: Green markers for wheelchair-accessible stations
+- **Real coordinates**: Precise GTFS latitude/longitude positioning
+- **Station complexity**: Grouped by MTA complex ID to avoid duplicates
+- **Structure information**: Shows if station is underground, elevated, or open cut
+- **Borough context**: Clear identification of which borough each station serves
+
+### CSV Data Integration
+The application automatically loads from `MTA_Subway_Stations_20250817.csv`:
+- **Automatic parsing**: CSV data processed into usable station and line objects
+- **Error handling**: Graceful fallback to hardcoded data if CSV unavailable
+- **Data validation**: Filters invalid coordinates and empty records
+- **Performance optimization**: Deduplicates stations by complex ID
+
+### Metro Features  
+- **Toggle stations visibility** with a single button control
+- **Nearest station lookup** when placing analysis points
+- **Distance calculations** to nearby subway stops
+- **Station information** in popups and tooltips
+- **Color-coded line identification** matching official MTA colors
+
+### Station Data
+Major stations include:
+- **Times Square-42nd St** (1,2,3,7,N,Q,R,W,S)
+- **Grand Central-42nd St** (4,5,6,7,S)
+- **Union Square-14th St** (4,5,6,L,N,Q,R,W)
+- **Atlantic Ave-Barclays Ctr** (2,3,4,5,B,D,N,Q,R,W)
+- And many more across Manhattan, Brooklyn, Queens, and the Bronx
+
+The metro integration enhances reachability analysis by providing context about public transit accessibility and helping users understand how subway connectivity affects travel times in different modes.
 
 ## 🔌 API Integration
 
@@ -211,6 +286,68 @@ Customize visual appearance in `css/style.css`:
 .isochrone-15min { fill: #ffff00; fill-opacity: 0.3; }
 /* Add more time-based styles */
 ```
+
+### Metro System Customization
+
+#### Adding/Modifying Subway Lines
+Update `js/metro-data.js` to add new lines or modify existing ones:
+
+```javascript
+// Add new subway line
+SUBWAY_COLORS['X'] = '#FF0000';  // New line color
+
+// Add route coordinates
+SUBWAY_LINES['X'] = [
+    [lat1, lng1],  // Station 1
+    [lat2, lng2],  // Station 2
+    // ... more coordinates
+];
+```
+
+#### Customizing Station Display
+Modify station appearance in the `METRO_CONFIG` object:
+
+```javascript
+const METRO_CONFIG = {
+    stationRadius: 4,          // Station marker size
+    lineWeight: 3,             // Line thickness
+    lineOpacity: 0.8,          // Line transparency
+    showLabels: true,          // Show station names
+    labelMinZoom: 13          // Zoom level for labels
+};
+```
+
+#### Adapting for Other Transit Systems
+To use this metro system for other cities:
+
+1. **Replace station data** in `SUBWAY_STATIONS` array
+2. **Update line colors** in `SUBWAY_COLORS` object
+3. **Modify route coordinates** in `SUBWAY_LINES` object
+4. **Add geographic routes** in `subway-routes.js` following actual transit corridors
+5. **Adjust metro configuration** for local transit characteristics
+
+### Geographic Route Customization
+
+The `subway-routes.js` file contains detailed geographic routing for each line:
+
+```javascript
+const SUBWAY_LINE_ROUTES = {
+    '4': [
+        [40.8753, -73.8638], // Woodlawn
+        [40.8691, -73.8648], // Mosholu Pkwy
+        // ... more geographic points following actual route
+        [40.6166, -73.9949]  // Bay Ridge-95th St
+    ],
+    // More lines...
+};
+```
+
+**Route Design Principles:**
+- Follow actual subway corridors and tunnels
+- Include major turns and geographic features
+- Smooth curves for visual appeal
+- Accurate borough-to-borough connections
+- Maintain proper line separation in complex areas
 
 ## 🌐 Browser Compatibility
 

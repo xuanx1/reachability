@@ -671,7 +671,7 @@ L.Control.Reachability = L.Control.extend({
             requestBody += ',"range":[' + arrRange.toString() + ']}';
 
             var request = new XMLHttpRequest();
-            request.open('POST', 'https://api.openrouteservice.org/v2/isochrones/' + this._travelMode);
+            request.open('POST', 'https://corsproxy.io/?' + encodeURIComponent('https://api.openrouteservice.org/v2/isochrones/' + this._travelMode));
             request.setRequestHeader('Accept', 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8');
             request.setRequestHeader('Authorization', apiKey);
             request.setRequestHeader('Content-Type', 'application/json; charset=utf-8');
