@@ -1,17 +1,22 @@
-# NYC Manhattan Reachability Map
+# NYC Reachability Map
 
-An interactive web application that visualizes reachability analysis (isochrones) for New York City's Manhattan area. Users can click on any location to see how far they can travel within a specified time using different transportation modes.
+An interactive web application that visualizes reachability analysis (isochrones) for New York City using Leaflet.js and the OpenRouteService API. Users can click anywhere on the map to see how far they can travel within a specified time using different transportation modes.
 
-![NYC Reachability Map](https://img.shields.io/badge/Status-Ready-green.svg)
+![NYC Reachability Map](https://img.shields.io/badge/Status-Active-brightgreen.svg)
+![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)
+![Leaflet](https://img.shields.io/badge/Leaflet-1.9.4-green.svg)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
-## Features
+## ✨ Features
 
-- 🗺️ **Interactive Map**: Click anywhere in Manhattan to analyze reachability
-- 🚶 **Multiple Travel Modes**: Walking, cycling, and driving options
-- ⏱️ **Flexible Time Ranges**: 5 to 30-minute travel time analysis
+- 🗺️ **Interactive Map**: Click anywhere in NYC to analyze reachability
+- 🚶 **Multiple Travel Modes**: Walking, cycling, driving, and wheelchair accessibility
+- ⏱️ **Flexible Time Ranges**: 5 to 60-minute travel time analysis
 - 🎨 **Visual Isochrones**: Color-coded areas showing reachable zones
-- 📱 **Responsive Design**: Works on desktop and mobile devices
+- 📱 **Responsive Design**: Optimized for desktop and mobile devices
 - 🔄 **Real-time Updates**: Drag markers to recalculate analysis instantly
+- 🧩 **Reachability Plugin**: Custom Leaflet plugin for advanced isochrone functionality
+- 🌍 **Borough Data**: Includes NYC borough boundary data for context
 
 ## Demo
 
