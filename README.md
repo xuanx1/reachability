@@ -1,8 +1,7 @@
 # NYC Manhattan Reachability Map
 
 An interactive web application that visualizes reachability analysis (isochrones) for New York City's Manhattan area. Users can click on any location to see how far they can travel within a specified time using different transportation modes.
-
-![NYC Reachability Map](https://img.shields.io/badge/Status-Ready-green.svg)
+![Screenshot 2025-08-16 204528](https://github.com/user-attachments/assets/585b5f27-558e-4ad5-8229-60ab079cbf63)
 
 ## Features
 
