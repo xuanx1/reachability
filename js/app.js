@@ -3,8 +3,165 @@
  * Uses Leaflet.js and OpenRouteService API for isochrone analysis
  */
 
-// API Key for OpenRouteService (demo key)
+// API Keys for OpenRouteService (primary and backup)
 const ORS_API_KEY = '5b3ce3597851110001cf6248c9f85cae50384963b985be5b9d179444';
+const ORS_BACKUP_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImNlZjQ1YzI0YmQ0ODRmNmY5NjdiOGI4M2VjNTE3NjAzIiwiaCI6Im11cm11cjY0In0=';
+
+// Array of API keys for fallback
+const API_KEYS = [ORS_API_KEY, ORS_BACKUP_API_KEY];
+let currentKeyIndex = 0;
+
+// Function to get current API key
+function getCurrentApiKey() {
+    return API_KEYS[currentKeyIndex];
+}
+
+// Function to try next API key when current one fails
+function tryNextApiKey() {
+    currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
+    console.log(`Switching to backup API key (index: ${currentKeyIndex})`);
+    return getCurrentApiKey();
+}
+
+// Enhanced fetch function with API key fallback
+async function fetchWithApiKeyFallback(url, options = {}) {
+    let attempts = 0;
+    const maxAttempts = API_KEYS.length;
+    
+    while (attempts < maxAttempts) {
+        try {
+            const response = await fetch(url, options);
+            
+            // If response is successful, return it
+            if (response.ok) {
+                return response;
+            }
+            
+            // If it's an auth/key error (401, 403), try next key
+            if (response.status === 401 || response.status === 403) {
+                console.warn(`API key failed with status ${response.status}, trying backup key...`);
+                tryNextApiKey();
+                // Update the URL with the new API key
+                url = url.replace(/api_key=[^&]+/, `api_key=${getCurrentApiKey()}`);
+                attempts++;
+                continue;
+            }
+            
+            // For other errors, return the response as-is
+            return response;
+            
+        } catch (error) {
+            console.error(`Network error with API key ${currentKeyIndex}:`, error);
+            
+            // Try next key on network errors too
+            if (attempts < maxAttempts - 1) {
+                tryNextApiKey();
+                url = url.replace(/api_key=[^&]+/, `api_key=${getCurrentApiKey()}`);
+                attempts++;
+                continue;
+            }
+            
+            // If all keys failed, throw the error
+            throw error;
+        }
+    }
+    
+    throw new Error('All API keys failed');
+}
+
+// Function to reinitialize reachability control with new API key
+function reinitializeReachabilityControl() {
+    if (reachabilityControl && map) {
+        console.log('Reinitializing reachability control with new API key...');
+        
+        // Remove existing control
+        map.removeControl(reachabilityControl);
+        
+        // Switch to next API key
+        tryNextApiKey();
+        
+        // Create new control with updated API key
+        reachabilityControl = L.control.reachability({
+            apiKey: getCurrentApiKey(),
+            
+            // Hide the plugin's built-in UI completely
+            collapsed: true,
+            
+            // Style functions
+            styleFn: styleIsolines,
+            mouseOverFn: highlightIsolines,
+            mouseOutFn: resetIsolines,
+            clickFn: clickIsolines,
+            markerFn: isolinesOrigin,
+            
+            // Hide all button content by setting to empty
+            expandButtonContent: '',
+            collapseButtonContent: '',
+            drawButtonContent: '',
+            deleteButtonContent: '',
+            exportButtonContent: '',
+            distanceButtonContent: '',
+            timeButtonContent: '',
+            travelModeButton1Content: '',
+            travelModeButton2Content: '',
+            travelModeButton3Content: '',
+            travelModeButton4Content: '',
+            
+            // Hide button style classes
+            expandButtonStyleClass: 'reachability-control-hide',
+            collapseButtonStyleClass: 'reachability-control-hide',
+            drawButtonStyleClass: 'reachability-control-hide',
+            deleteButtonStyleClass: 'reachability-control-hide',
+            exportButtonStyleClass: 'reachability-control-hide',
+            distanceButtonStyleClass: 'reachability-control-hide',
+            timeButtonStyleClass: 'reachability-control-hide',
+            travelModeButton1StyleClass: 'reachability-control-hide',
+            travelModeButton2StyleClass: 'reachability-control-hide',
+            travelModeButton3StyleClass: 'reachability-control-hide',
+            travelModeButton4StyleClass: 'reachability-control-hide',
+            
+            // Travel mode profiles to match our button data-mode values
+            travelModeProfile1: 'driving-car',
+            travelModeProfile2: 'cycling-regular', 
+            travelModeProfile3: 'foot-walking',
+            travelModeProfile4: 'wheelchair',
+            travelModeDefault: 'foot-walking',
+            
+            // Range type default (time or distance)
+            rangeTypeDefault: 'time',
+            
+            // Default settings - 15 minute walk with intervals
+            rangeControlTimeDefault: 15,
+            rangeControlTimeMax: 30,
+            rangeControlTimeInterval: 5,
+            rangeControlDistanceDefault: 1,
+            rangeControlDistanceMax: 5,
+            rangeControlDistanceInterval: 0.5,
+            
+            pane: 'popupPane',
+            position: 'bottomright'
+        }).addTo(map);
+        
+        // Enable intervals by default in the reinitialized reachability plugin
+        setTimeout(() => {
+            if (reachabilityControl && reachabilityControl._showInterval) {
+                reachabilityControl._showInterval.checked = true;
+                console.log('Intervals enabled by default in reinitialized reachability plugin');
+            }
+        }, 100);
+        
+        console.log(`Reachability control reinitialized with API key index: ${currentKeyIndex}`);
+        return true;
+    }
+    return false;
+}
+
+// Function to immediately switch to backup API key (useful when quota is exceeded)
+function switchToBackupApiKey() {
+    console.log('Manually switching to backup API key due to quota exceeded...');
+    return reinitializeReachabilityControl();
+}
+
 
 // NYC coordinates
 const NYC_CENTER = [40.7580, -73.9855]; // Times Square area
@@ -117,7 +274,7 @@ function initMap() {
 
     // Initialize reachability control
     reachabilityControl = L.control.reachability({
-        apiKey: ORS_API_KEY,
+        apiKey: getCurrentApiKey(),
         
         // Hide the plugin's built-in UI completely
         collapsed: true,
@@ -165,8 +322,8 @@ function initMap() {
         // Range type default (time or distance)
         rangeTypeDefault: 'time',
         
-        // Default settings
-        rangeControlTimeDefault: 10,
+        // Default settings - 15 minute walk with intervals
+        rangeControlTimeDefault: 15,
         rangeControlTimeMax: 30,
         rangeControlTimeInterval: 5,
         rangeControlDistanceDefault: 1,
@@ -176,6 +333,42 @@ function initMap() {
         pane: 'popupPane',
         position: 'bottomright'
     }).addTo(map);
+
+    // Enable intervals by default in the reachability plugin
+    setTimeout(() => {
+        if (reachabilityControl && reachabilityControl._showInterval) {
+            reachabilityControl._showInterval.checked = true;
+            console.log('Intervals enabled by default in reachability plugin');
+        }
+    }, 100);
+
+    // Listen for reachability plugin errors and automatically switch API keys
+    map.on('reachability:error', function(e) {
+        console.warn('Reachability API error detected, attempting to switch to backup key...');
+        
+        // Add a small delay to prevent rapid switching
+        setTimeout(() => {
+            if (reinitializeReachabilityControl()) {
+                console.log('Successfully switched to backup API key');
+                // Show user-friendly message
+                alert('Switched to backup API service. You can continue using the reachability analysis.');
+            } else {
+                console.error('Failed to reinitialize reachability control');
+                alert('API service temporarily unavailable. Please try again later.');
+            }
+        }, 1000);
+    });
+
+    // Also listen for no_data events which might indicate API issues
+    map.on('reachability:no_data', function(e) {
+        console.warn('Reachability no_data event - this might indicate API quota or key issues');
+    });
+
+    // Proactively switch to backup key since primary key quota is exceeded
+    setTimeout(() => {
+        console.log('Proactively switching to backup API key to avoid quota issues...');
+        switchToBackupApiKey();
+    }, 2000);
 
     // Listen for popup events to trigger reachability popup styling
     map.on('popupopen', function(e) {
@@ -446,12 +639,26 @@ function initializeEventHandlers() {
     function initializeDefaultExample() {
         console.log('Initializing default example...');
         
-        // Enable intervals by default
+        // Enable intervals by default - multiple approaches for reliability
         const showIntervalsCheckbox = document.getElementById('show-intervals');
-        showIntervalsCheckbox.checked = true;
-        if (reachabilityControl && reachabilityControl._showInterval) {
-            reachabilityControl._showInterval.checked = true;
+        if (showIntervalsCheckbox) {
+            showIntervalsCheckbox.checked = true;
+            // Trigger the change event to sync with plugin
+            const event = new Event('change');
+            showIntervalsCheckbox.dispatchEvent(event);
+            console.log('UI intervals checkbox enabled and change event triggered');
         }
+        
+        // Additional fallback: Enable intervals in the reachability plugin directly
+        setTimeout(() => {
+            if (reachabilityControl && reachabilityControl._showInterval) {
+                reachabilityControl._showInterval.checked = true;
+                // Trigger the change event on the plugin's checkbox too
+                const pluginEvent = new Event('change');
+                reachabilityControl._showInterval.dispatchEvent(pluginEvent);
+                console.log('Plugin intervals checkbox force-enabled with change event');
+            }
+        }, 500);
 
         // Set travel mode to walking and update UI
         selectTravelMode('foot-walking');
@@ -543,6 +750,13 @@ function updateLegendDisplay(mode) {
         const span = item.querySelector('span');
         if (span) {
             const modeText = span.textContent.toLowerCase();
+            
+            // Always keep subway stations legend active
+            if (modeText === 'subway stations') {
+                item.style.opacity = '1';
+                return;
+            }
+            
             const isActive = mode.includes(modeText) || 
                            (mode === 'foot-walking' && modeText === 'walking') ||
                            (mode === 'cycling-regular' && modeText === 'cycling') ||
@@ -775,7 +989,7 @@ async function searchLocation() {
         
         // If not coordinates, use geocoding service
         const response = await fetch(
-            `https://api.openrouteservice.org/geocode/search?api_key=5b3ce3597851110001cf6248c9f85cae50384963b985be5b9d179444&text=${encodeURIComponent(query)}&boundary.rect.min_lon=-74.0479&boundary.rect.min_lat=40.6892&boundary.rect.max_lon=-73.9067&boundary.rect.max_lat=40.8820&size=8`
+            `https://api.openrouteservice.org/geocode/search?api_key=${getCurrentApiKey()}&text=${encodeURIComponent(query)}&boundary.rect.min_lon=-74.0479&boundary.rect.min_lat=40.6892&boundary.rect.max_lon=-73.9067&boundary.rect.max_lat=40.8820&size=8`
         );
         
         if (!response.ok) {
@@ -804,7 +1018,7 @@ async function showCoordinateDropdown(lat, lng, originalQuery) {
     try {
         // Try to get a proper location name via reverse geocoding
         const response = await fetch(
-            `https://api.openrouteservice.org/geocode/reverse?api_key=5b3ce3597851110001cf6248c9f85cae50384963b985be5b9d179444&point.lon=${lng}&point.lat=${lat}&size=1`
+            `https://api.openrouteservice.org/geocode/reverse?api_key=${getCurrentApiKey()}&point.lon=${lng}&point.lat=${lat}&size=1`
         );
         
         let locationName = `Location at ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
@@ -986,7 +1200,7 @@ async function reverseGeocodeAndPlot(lat, lng, originalQuery) {
     try {
         // Try reverse geocoding to get a proper location name
         const response = await fetch(
-            `https://api.openrouteservice.org/geocode/reverse?api_key=5b3ce3597851110001cf6248c9f85cae50384963b985be5b9d179444&point.lon=${lng}&point.lat=${lat}&size=1`
+            `https://api.openrouteservice.org/geocode/reverse?api_key=${getCurrentApiKey()}&point.lon=${lng}&point.lat=${lat}&size=1`
         );
         
         if (response.ok) {
@@ -1015,7 +1229,7 @@ async function searchAndPlotFirst(query) {
     try {
         // Use geocoding service
         const response = await fetch(
-            `https://api.openrouteservice.org/geocode/search?api_key=5b3ce3597851110001cf6248c9f85cae50384963b985be5b9d179444&text=${encodeURIComponent(query)}&boundary.rect.min_lon=-74.0479&boundary.rect.min_lat=40.6892&boundary.rect.max_lon=-73.9067&boundary.rect.max_lat=40.8820&size=1`
+            `https://api.openrouteservice.org/geocode/search?api_key=${getCurrentApiKey()}&text=${encodeURIComponent(query)}&boundary.rect.min_lon=-74.0479&boundary.rect.min_lat=40.6892&boundary.rect.max_lon=-73.9067&boundary.rect.max_lat=40.8820&size=1`
         );
         
         if (!response.ok) {
@@ -1319,18 +1533,8 @@ async function drawSubwayLinesFromMTA() {
                         lineId: lineId
                     });
                     
-                    // Add popup with line information
-                    polyline.bindPopup(`
-                        <div class="subway-popup">
-                            <h3>Subway Line ${lineId}</h3>
-                            <div class="lines">
-                                <span class="line-badge" style="background-color: ${color};">${lineId}</span>
-                            </div>
-                            <p>Route: ${properties.name || lineId}</p>
-                        </div>
-                    `);
-                    
-                    // Add hover effects
+                    // Hover effects disabled for subway lines
+                    /*
                     polyline.on('mouseover', function(e) {
                         const layer = e.target;
                         layer.setStyle({
@@ -1346,6 +1550,7 @@ async function drawSubwayLinesFromMTA() {
                             opacity: 0.8
                         });
                     });
+                    */
                     
                     metroLinesGroup.addLayer(polyline);
                 });
@@ -1394,17 +1599,8 @@ function drawSubwayLinesFromHardcodedData() {
                 lineId: lineId
             });
             
-            // Add popup with line information
-            polyline.bindPopup(`
-                <div class="subway-popup">
-                    <h3>Subway Line ${lineId}</h3>
-                    <div class="lines">
-                        <span class="line-badge" style="background-color: ${color};">${lineId}</span>
-                    </div>
-                </div>
-            `);
-            
-            // Add hover effects
+            // Hover effects disabled for subway lines
+            /*
             polyline.on('mouseover', function(e) {
                 const layer = e.target;
                 layer.setStyle({
@@ -1420,6 +1616,7 @@ function drawSubwayLinesFromHardcodedData() {
                     opacity: 0.8
                 });
             });
+            */
             
             metroLinesGroup.addLayer(polyline);
         }
@@ -1574,7 +1771,8 @@ function drawSubwayStationsFromMTA() {
             
             const wheelchairMarker = L.marker([station.lat, station.lng], {
                 icon: wheelchairIcon,
-                pane: 'wheelchair-icons'
+                pane: 'wheelchair-icons',
+                interactive: false // Disable all mouse interactions for wheelchair markers
             });
             
             metroStationsGroup.addLayer(wheelchairMarker);
@@ -1716,8 +1914,23 @@ function getBoroughName(code) {
  */
 function toggleMetroLayers() {
     if (metroLayersVisible) {
-        map.removeLayer(metroLinesGroup);
-        map.removeLayer(metroStationsGroup);
+        // Grey out stations and lines instead of removing them
+        metroStationsGroup.eachLayer(function(layer) {
+            if (layer.getElement) {
+                layer.getElement().classList.add('inactive');
+            } else if (layer._path) {
+                layer._path.classList.add('inactive');
+            }
+        });
+        
+        metroLinesGroup.eachLayer(function(layer) {
+            if (layer.getElement) {
+                layer.getElement().classList.add('inactive');
+            } else if (layer._path) {
+                layer._path.classList.add('inactive');
+            }
+        });
+        
         metroLayersVisible = false;
         
         // Update button text
@@ -1727,8 +1940,23 @@ function toggleMetroLayers() {
             toggleBtn.classList.remove('active');
         }
     } else {
-        map.addLayer(metroLinesGroup);
-        map.addLayer(metroStationsGroup);
+        // Remove inactive class to restore normal appearance
+        metroStationsGroup.eachLayer(function(layer) {
+            if (layer.getElement) {
+                layer.getElement().classList.remove('inactive');
+            } else if (layer._path) {
+                layer._path.classList.remove('inactive');
+            }
+        });
+        
+        metroLinesGroup.eachLayer(function(layer) {
+            if (layer.getElement) {
+                layer.getElement().classList.remove('inactive');
+            } else if (layer._path) {
+                layer._path.classList.remove('inactive');
+            }
+        });
+        
         metroLayersVisible = true;
         
         // Update button text
