@@ -7,6 +7,8 @@ An interactive web application that visualizes reachability analysis (isochrones
 ![Leaflet](https://img.shields.io/badge/Leaflet-1.9.4-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
+![reachability](https://github.com/user-attachments/assets/26852e09-271d-4ddf-a8bb-5f387909e089)
+
 ## ✨ Features
 
 - 🗺️ **Interactive Map**: Click anywhere in NYC to analyze reachability
