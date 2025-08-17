@@ -1,4 +1,4 @@
-# NYC Reachability Map
+# NYC Reachability Map [Preview](https://xuanx1.github.io/reachability/)
 
 An interactive web application that visualizes reachability analysis (isochrones) for New York City using Leaflet.js and the OpenRouteService API. Users can click anywhere on the map to see how far they can travel within a specified time using different transportation modes.
 
