@@ -755,7 +755,11 @@ L.Control.Reachability = L.Control.extend({
             data.features[i].properties = newProps;
         }
 
-        this.latestIsolines = L.geoJSON(data, { style: this.options.styleFn, pane: this.options.pane });
+        this.latestIsolines = L.geoJSON(data, { 
+            style: this.options.styleFn, 
+            onEachFeature: this.options.onEachFeatureFn, 
+            pane: this.options.pane 
+        });
 
         var context = this;
         this.latestIsolines.eachLayer(function (layer) {

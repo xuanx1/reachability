@@ -89,6 +89,7 @@ function reinitializeReachabilityControl() {
             
             // Style functions
             styleFn: styleIsolines,
+            onEachFeatureFn: onEachIsochroneFeature,
             mouseOverFn: highlightIsolines,
             mouseOutFn: resetIsolines,
             clickFn: clickIsolines,
@@ -138,7 +139,7 @@ function reinitializeReachabilityControl() {
             rangeControlDistanceMax: 5,
             rangeControlDistanceInterval: 0.5,
             
-            pane: 'popupPane',
+            pane: 'overlayPane',
             position: 'bottomright'
         }).addTo(map);
         
@@ -208,6 +209,111 @@ function styleIsolines(feature) {
     }
     
     return style;
+}
+
+/**
+ * Function to create label content for each isochrone feature
+ */
+function onEachIsochroneFeature(feature, layer) {
+    const props = feature.properties;
+    const range = props['Range'];
+    const units = props['Range units'];
+    
+    // Create label text based on range type
+    let labelText = '';
+    if (units.toLowerCase().includes('minute') || units.toLowerCase().includes('min')) {
+        labelText = `${range} min`;
+    } else if (units.toLowerCase().includes('km') || units.toLowerCase().includes('kilometer')) {
+        labelText = `${range} km`;
+    } else {
+        labelText = `${range} ${units}`;
+    }
+    
+    // Add multiple labels along the contour at strategic positions
+    addContourLabels(layer, labelText);
+    
+    // Store label info in the feature properties for export
+    feature.properties['_label'] = labelText;
+    feature.properties['_labelPosition'] = 'along-line';
+}
+
+/**
+ * Function to add labels along the contour line at multiple positions
+ */
+function addContourLabels(layer, labelText) {
+    if (!layer.getBounds) return;
+    
+    const bounds = layer.getBounds();
+    const coords = layer.getLatLngs();
+    
+    // Function to calculate distance between two points
+    function getDistance(latlng1, latlng2) {
+        return map.distance(latlng1, latlng2);
+    }
+    
+    // Function to get points along the polygon perimeter
+    function getPerimeterPoints(coordsArray) {
+        let points = [];
+        
+        if (coordsArray && coordsArray[0]) {
+            const ring = coordsArray[0]; // Get outer ring
+            const totalPoints = ring.length;
+            
+            // Calculate total perimeter length
+            let totalLength = 0;
+            for (let i = 0; i < totalPoints - 1; i++) {
+                totalLength += getDistance(ring[i], ring[i + 1]);
+            }
+            
+            // Place labels at strategic positions along the perimeter
+            const targetPositions = [0.2, 0.5, 0.8]; // 20%, 50%, 80% along perimeter
+            
+            for (let targetRatio of targetPositions) {
+                let targetLength = totalLength * targetRatio;
+                let currentLength = 0;
+                
+                for (let i = 0; i < totalPoints - 1; i++) {
+                    const segmentLength = getDistance(ring[i], ring[i + 1]);
+                    
+                    if (currentLength + segmentLength >= targetLength) {
+                        // Interpolate position along this segment
+                        const segmentRatio = (targetLength - currentLength) / segmentLength;
+                        const lat = ring[i].lat + (ring[i + 1].lat - ring[i].lat) * segmentRatio;
+                        const lng = ring[i].lng + (ring[i + 1].lng - ring[i].lng) * segmentRatio;
+                        
+                        points.push(L.latLng(lat, lng));
+                        break;
+                    }
+                    currentLength += segmentLength;
+                }
+            }
+        }
+        
+        return points;
+    }
+    
+    // Get strategic points along the contour
+    const labelPositions = getPerimeterPoints(coords);
+    
+    // Create labels at each position
+    labelPositions.forEach((position, index) => {
+        const tooltip = L.tooltip({
+            permanent: true,
+            direction: 'center',
+            className: 'isochrone-contour-label',
+            opacity: 0.9,
+            offset: [0, 0]
+        }).setContent(labelText).setLatLng(position);
+        
+        // Add the tooltip to the layer
+        tooltip.addTo(map);
+        
+        // Store reference for cleanup
+        if (!layer._contourLabels) {
+            layer._contourLabels = [];
+        }
+        layer._contourLabels.push(tooltip);
+    });
 }
 
 /**
@@ -336,6 +442,7 @@ function initMap() {
         
         // Style functions
         styleFn: styleIsolines,
+        onEachFeatureFn: onEachIsochroneFeature,
         mouseOverFn: highlightIsolines,
         mouseOutFn: resetIsolines,
         clickFn: clickIsolines,
@@ -385,9 +492,24 @@ function initMap() {
         rangeControlDistanceMax: 5,
         rangeControlDistanceInterval: 0.5,
         
-        pane: 'popupPane',
+        pane: 'overlayPane',
         position: 'bottomright'
     }).addTo(map);
+
+    // Set z-index layering to put reachability diagrams behind labels
+    setTimeout(() => {
+        // Reachability diagrams (isochrones) - lower z-index
+        if (map.getPane('overlayPane')) {
+            map.getPane('overlayPane').style.zIndex = 400;
+        }
+        // Labels and popups - higher z-index  
+        if (map.getPane('tooltipPane')) {
+            map.getPane('tooltipPane').style.zIndex = 650;
+        }
+        if (map.getPane('popupPane')) {
+            map.getPane('popupPane').style.zIndex = 700;
+        }
+    }, 100);
 
     // Enable intervals by default in the reachability plugin
     setTimeout(() => {
@@ -428,6 +550,12 @@ function initMap() {
     // Listen for popup events (simplified)
     map.on('popupopen', function(e) {
         console.log('Popup opened');
+    });
+
+    // Clean up contour labels when isochrones are deleted
+    map.on('reachability:delete', function(e) {
+        console.log('Cleaning up contour labels...');
+        cleanupContourLabels();
     });
 
     // Set up event listener to deactivate plot button after any isochrone is displayed
@@ -2070,6 +2198,26 @@ function showNearestStationsInfo(lat, lng) {
     });
     
     return info;
+}
+
+/**
+ * Function to clean up all contour labels
+ */
+function cleanupContourLabels() {
+    if (reachabilityControl && reachabilityControl.isolinesGroup) {
+        reachabilityControl.isolinesGroup.eachLayer(function(group) {
+            group.eachLayer(function(layer) {
+                if (layer._contourLabels) {
+                    layer._contourLabels.forEach(function(tooltip) {
+                        if (map.hasLayer(tooltip)) {
+                            map.removeLayer(tooltip);
+                        }
+                    });
+                    layer._contourLabels = [];
+                }
+            });
+        });
+    }
 }
 
 // Initialize the app when DOM is loaded
